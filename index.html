@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TOEIC 词汇大师 · 托业间隔重复学习</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+  body { font-family: ui-sans-serif, system-ui, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  /* ---- 闪卡 3D 翻转 ---- */
+  .flip { perspective: 1200px; }
+  .flip-inner { position: relative; transition: transform .55s cubic-bezier(.4,.1,.2,1); transform-style: preserve-3d; }
+  .flip-inner.flipped { transform: rotateY(180deg); }
+  .flip-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+  .flip-back { position: absolute; inset: 0; transform: rotateY(180deg); overflow-y: auto; }
+  .kbd { border:1px solid #d1d5db; border-bottom-width:2px; border-radius:4px; padding:0 5px; font-size:11px; background:#f9fafb; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+</style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen">
+<div id="app" class="max-w-3xl mx-auto px-3 sm:px-6 pb-16">
+
+  <!-- ================= 头部 ================= -->
+  <header class="pt-6 pb-4 text-center">
+    <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-600 to-sky-500 bg-clip-text text-transparent">
+      TOEIC 词汇大师
+    </h1>
+    <p class="text-xs sm:text-sm text-slate-500 mt-1">间隔重复 × 主动回忆，科学攻克托业高频词</p>
+  </header>
+
+  <!-- ================= 导航 ================= -->
+  <nav class="sticky top-2 z-30 bg-white/90 backdrop-blur rounded-2xl shadow-lg shadow-slate-200/60 p-1.5 flex gap-1 mb-6">
+    <button v-for="t in tabs" :key="t.id" @click="view = t.id"
+      class="flex-1 py-2 rounded-xl text-sm sm:text-base font-semibold transition"
+      :class="view===t.id ? 'bg-indigo-600 text-white shadow' : 'text-slate-500 hover:bg-slate-100'">
+      {{ t.label }}<span v-if="t.id==='study' && dueCount" class="ml-1 text-[10px] bg-rose-500 text-white rounded-full px-1.5 py-0.5">{{ dueCount }}</span>
+    </button>
+  </nav>
+
+  <!-- ================= 首页 ================= -->
+  <section v-if="view==='home'" class="space-y-5">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="bg-white rounded-2xl p-4 shadow-sm text-center">
+        <div class="text-2xl font-extrabold text-indigo-600">{{ allWords.length }}</div>
+        <div class="text-xs text-slate-500 mt-1">词库总量</div>
+      </div>
+      <div class="bg-white rounded-2xl p-4 shadow-sm text-center">
+        <div class="text-2xl font-extrabold text-rose-500">{{ dueCount }}</div>
+        <div class="text-xs text-slate-500 mt-1">今日待复习</div>
+      </div>
+      <div class="bg-white rounded-2xl p-4 shadow-sm text-center">
+        <div class="text-2xl font-extrabold text-amber-500">{{ learningCount }}</div>
+        <div class="text-xs text-slate-500 mt-1">记忆巩固中</div>
+      </div>
+      <div class="bg-white rounded-2xl p-4 shadow-sm text-center">
+        <div class="text-2xl font-extrabold text-emerald-500">{{ masteredCount }}</div>
+        <div class="text-xs text-slate-500 mt-1">已掌握(≥4级)</div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl p-5 shadow-sm">
+      <div class="flex items-baseline justify-between mb-3">
+        <h2 class="font-bold">分场景进度</h2>
+        <span class="text-xs text-slate-400">点击场景开始针对性复习</span>
+      </div>
+      <div class="space-y-3">
+        <div v-for="c in catStats" :key="c.key" @click="startStudy(c.key)"
+             class="cursor-pointer rounded-xl border border-slate-100 hover:border-indigo-300 hover:bg-indigo-50/40 p-3 transition">
+          <div class="flex justify-between text-sm mb-1.5">
+            <span>
+              <span class="inline-block w-2 h-2 rounded-full mr-1.5" :class="'bg-'+c.color+'-500'"></span>
+              <span class="font-semibold">{{ c.label }}</span>
+            </span>
+            <span class="text-slate-400 text-xs">{{ c.due>0 ? c.due+' 词待复习 · ':'' }}掌握 {{ c.mastered }}/{{ c.total }}</span>
+          </div>
+          <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-500" :class="'bg-'+c.color+'-400'" :style="{width: c.pct+'%'}"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button @click="startStudy('')" :disabled="!allWords.length"
+      class="w-full py-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-sky-500 text-white font-bold text-lg shadow-lg shadow-indigo-200 hover:opacity-90 disabled:opacity-40 transition">
+      {{ dueCount ? '开始今日复习（' + dueCount + ' 词）' : '提前复习全部词库' }}
+    </button>
+
+    <div class="text-center text-xs text-slate-400 leading-5">
+      进度自动保存在浏览器本地（localStorage），刷新页面不丢失<br>
+      复习快捷键：<span class="kbd">空格</span> 翻转 · <span class="kbd">1</span> 忘记 · <span class="kbd">2</span> 模糊 · <span class="kbd">3</span> 认识
+    </div>
+  </section>
+
+  <!-- ================= 闪卡模式 ================= -->
+  <section v-if="view==='study'" class="space-y-4">
+    <template v-if="sQueue.length && !sFinished">
+      <div class="flex items-center gap-3">
+        <div class="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
+          <div class="h-full bg-indigo-500 rounded-full transition-all" :style="{width:(sIdx/sQueue.length*100)+'%'}"></div>
+        </div>
+        <span class="text-xs text-slate-500 tabular-nums">{{ sIdx+1 }} / {{ sQueue.length }}</span>
+        <span v-if="preStudy" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">提前复习</span>
+      </div>
+
+      <div class="flip min-h-[340px] sm:min-h-[300px]" @click="sFlipped=!sFlipped">
+        <div class="flip-inner min-h-[340px] sm:min-h-[300px]" :class="{flipped:sFlipped}">
+          <!-- 正面：单词 -->
+          <div class="flip-face bg-white rounded-3xl shadow p-6 flex flex-col items-center justify-center text-center min-h-[340px] sm:min-h-[300px]">
+            <span class="text-[10px] px-2 py-0.5 rounded-full mb-4" :class="'bg-'+catColor(sCur.category)+'-100 text-'+catColor(sCur.category)+'-700'">{{ catLabel(sCur.category) }}</span>
+            <div class="text-4xl sm:text-5xl font-extrabold tracking-wide flex items-center gap-3">
+              {{ sCur.word }}
+              <button @click.stop="speak(sCur.word, sCur.audio)" title="朗读单词"
+                class="text-xl w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:scale-110 active:scale-95 transition shrink-0">🔊</button>
+            </div>
+            <div class="text-slate-400 mt-3">{{ sCur.phonetic || '' }}</div>
+            <div class="text-amber-400 tracking-widest mt-3">{{ levelStars(sCur.level) }}</div>
+            <div class="text-xs text-slate-400 mt-6">点击卡片翻转查看释义 →</div>
+          </div>
+          <!-- 背面：释义+例句 -->
+          <div class="flip-face flip-back bg-gradient-to-br from-indigo-50 to-sky-50 rounded-3xl shadow p-6 text-left">
+            <div class="flex items-center gap-3 flex-wrap">
+              <span class="text-2xl font-bold">{{ sCur.word }}</span>
+              <button @click.stop="speak(sCur.word, sCur.audio)" title="朗读单词"
+                class="text-sm w-7 h-7 rounded-full bg-white text-indigo-600 hover:bg-indigo-100 active:scale-90 transition shrink-0">🔊</button>
+              <span class="text-slate-500 text-sm">{{ sCur.phonetic }}</span>
+              <span class="text-xs px-1.5 py-0.5 bg-white rounded" v-if="sCur.pos">{{ sCur.pos }}</span>
+            </div>
+            <p class="mt-3 text-lg font-medium whitespace-pre-line">{{ showMeaning(sCur) }}</p>
+            <div v-if="sCur.example" class="mt-4 bg-white/70 rounded-xl p-3 text-sm">
+              <p class="italic text-slate-700" v-html="hlExample(sCur.example, sCur.word)"></p>
+              <p v-if="sCur.exampleCn" class="text-slate-400 mt-1.5">{{ sCur.exampleCn }}</p>
+            </div>
+            <button v-if="!showMeaning(sCur)" @click.stop="lookupOne(sCur.word)" :disabled="busyWord===sCur.word"
+              class="mt-4 text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white disabled:opacity-50">
+              {{ busyWord===sCur.word ? '查询中…' : '📖 联网获取释义' }}
+            </button>
+            <div class="text-xs text-slate-400 mt-4 text-center">回忆一下再对照答案 · 点击翻回</div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="sFlipped" class="grid grid-cols-3 gap-3">
+        <button @click="answer('bad')" class="py-3 rounded-2xl bg-rose-500 text-white font-bold hover:bg-rose-600 active:scale-95 transition">忘记 <span class="text-xs opacity-75">1</span></button>
+        <button @click="answer('vague')" class="py-3 rounded-2xl bg-amber-500 text-white font-bold hover:bg-amber-600 active:scale-95 transition">模糊 <span class="text-xs opacity-75">2</span></button>
+        <button @click="answer('good')" class="py-3 rounded-2xl bg-emerald-500 text-white font-bold hover:bg-emerald-600 active:scale-95 transition">认识 <span class="text-xs opacity-75">3</span></button>
+      </div>
+      <button v-else @click="sFlipped=true" class="w-full py-3 rounded-2xl bg-slate-800 text-white font-semibold hover:bg-slate-700 transition">显示答案 <span class="text-xs opacity-60">(空格)</span></button>
+    </template>
+
+    <!-- 本轮完成 -->
+    <div v-else-if="sFinished" class="bg-white rounded-3xl shadow p-8 text-center space-y-4">
+      <div class="text-5xl">🎉</div>
+      <h2 class="text-xl font-bold">本轮复习完成！</h2>
+      <p class="text-sm text-slate-500">本次复习 <b class="text-indigo-600">{{ sDone }}</b> 词 · 忘记 <b class="text-rose-500">{{ sStat.bad }}</b> · 模糊 <b class="text-amber-500">{{ sStat.vague }}</b> · 认识 <b class="text-emerald-500">{{ sStat.good }}</b></p>
+      <p class="text-xs text-slate-400">忘记的词将在 10 分钟后重新出现，按艾宾浩斯曲线持续巩固</p>
+      <div class="flex gap-3 justify-center">
+        <button @click="startStudy(pendingCat)" class="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-semibold">再来一轮</button>
+        <button @click="view='home'" class="px-5 py-2.5 rounded-xl bg-slate-100">回首页</button>
+      </div>
+    </div>
+
+    <!-- 空队列 -->
+    <div v-else class="bg-white rounded-3xl shadow p-8 text-center space-y-3">
+      <div class="text-4xl">✅</div>
+      <p class="font-semibold">该范围暂无到期单词</p>
+      <button @click="buildQueue(pendingCat, true)" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm">提前复习全部（{{ allWords.length }} 词）</button>
+    </div>
+  </section>
+
+  <!-- ================= 拼写测试模式 ================= -->
+  <section v-if="view==='test'" class="space-y-4">
+    <template v-if="tQueue.length && !tFinished">
+      <div class="flex items-center gap-3">
+        <div class="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
+          <div class="h-full bg-sky-500 rounded-full transition-all" :style="{width:(tIdx/tQueue.length*100)+'%'}"></div>
+        </div>
+        <span class="text-xs text-slate-500 tabular-nums">{{ tIdx+1 }} / {{ tQueue.length }}</span>
+        <span class="text-xs px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">正确率 {{ tAccuracy }}%</span>
+      </div>
+
+      <div class="bg-white rounded-3xl shadow p-6 sm:p-8">
+        <span class="text-[10px] px-2 py-0.5 rounded-full" :class="'bg-'+catColor(tCur.category)+'-100 text-'+catColor(tCur.category)+'-700'">{{ catLabel(tCur.category) }}</span>
+        <div class="mt-4">
+          <div class="text-xs text-slate-400 mb-1">根据释义拼写出单词：</div>
+          <p class="text-xl font-semibold whitespace-pre-line">{{ showMeaning(tCur) || '（该词暂无释义，请先在词库中联网获取）' }}</p>
+        </div>
+        <div v-if="tCur.example" class="mt-4 bg-slate-50 rounded-xl p-3 text-sm text-slate-600">
+          例句：<span v-html="hlExample(tCur.example, ' '.repeat(Math.max(3,tCur.word.length)))"></span>
+        </div>
+        <!-- 支付密码式逐格输入：透明真输入框捕获按键，格子负责显示 -->
+        <div class="mt-5 relative cursor-pointer" @click="spellInput && spellInput.focus()">
+          <div class="flex flex-wrap gap-1.5 justify-center select-none">
+            <div v-for="(c, i) in tCells" :key="tCur.word + '-' + i"
+              class="w-8 h-10 sm:w-9 sm:h-11 rounded-lg border-2 flex items-center justify-center text-lg font-bold font-mono transition-all"
+              :class="cellClass(i)">{{ cellChar(i) }}</div>
+          </div>
+          <input ref="spellInput" :value="tInput" @input="onPinInput"
+            :readonly="!!tResult" :maxlength="tAnswer.length"
+            class="absolute inset-0 w-full opacity-0 caret-transparent outline-none"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="latin">
+          <p class="text-center text-xs text-slate-400 mt-2">
+            共 {{ tAnswer.length }} 个字母 · 逐格输入自动前进 · 填满即提交 · 退格可修改
+          </p>
+        </div>
+        <div class="flex justify-center mt-3">
+          <button @click="giveHint" :disabled="!!tResult || hintsUsed >= MAX_HINTS"
+            class="px-4 py-1.5 rounded-full border border-amber-300 text-amber-600 text-sm font-semibold hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition">
+            💡 提示（{{ hintsUsed }}/{{ MAX_HINTS }}）· {{ hintsUsed === 0 ? '显示第 1 个字母' : (hintsUsed === 1 ? '显示第 2 个字母' : '提示已用完') }}
+          </button>
+        </div>
+
+        <div v-if="tResult" class="mt-4 rounded-xl p-4 text-sm space-y-1"
+             :class="tResult==='exact'?'bg-emerald-50 text-emerald-800':(tResult==='near'?'bg-amber-50 text-amber-800':'bg-rose-50 text-rose-800')">
+          <p class="font-bold text-base">{{ tResult==='exact' ? '✓ 完全正确！' : (tResult==='near' ? '≈ 基本正确（有小笔误）' : '✗ 答错了') }}</p>
+          <p class="flex items-baseline gap-2 flex-wrap">正确答案：<b class="font-mono text-lg">{{ tCur.word }}</b>
+            <button @click="speak(tCur.word, tCur.audio)" title="朗读单词" class="text-xs w-6 h-6 rounded-full bg-white text-indigo-600 hover:bg-indigo-100 active:scale-90 transition">🔊</button>
+            <span class="text-slate-400">{{ tCur.phonetic }}</span>
+          </p>
+          <p v-if="tCur.example" class="italic text-slate-500" v-html="hlExample(tCur.example, tCur.word)"></p>
+          <p class="text-xs opacity-70">{{ tResult==='wrong' ? '已重置为 0 级，10 分钟后再次出现' : (hintsUsed > 0 ? '本次用了提示，按「模糊」计入记忆（不升级，半间隔后快速重练）' : '熟悉度提升，下次复习间隔拉长') }}</p>
+        </div>
+        <button v-if="tResult" @click="nextTest" class="mt-4 w-full py-3 rounded-2xl bg-slate-800 text-white font-bold hover:bg-slate-700">下一题 → <span class="text-xs opacity-60">(回车)</span></button>
+      </div>
+      <button @click="revealAnswer" v-if="!tResult" class="w-full py-2 text-sm text-slate-500 hover:text-indigo-600">实在想不出来？看答案并按“忘记”处理</button>
+    </template>
+
+    <div v-else-if="tFinished" class="bg-white rounded-3xl shadow p-8 text-center space-y-4">
+      <div class="text-5xl">🏆</div>
+      <h2 class="text-xl font-bold">测试完成！正确率 {{ tAccuracy }}%</h2>
+      <div class="flex gap-3 justify-center">
+        <button @click="startTest(pendingCat)" class="px-5 py-2.5 rounded-xl bg-sky-600 text-white font-semibold">再测一轮</button>
+        <button @click="view='home'" class="px-5 py-2.5 rounded-xl bg-slate-100">回首页</button>
+      </div>
+    </div>
+
+    <div v-else class="bg-white rounded-3xl shadow p-8 text-center space-y-3">
+      <div class="text-4xl">📝</div>
+      <p class="font-semibold">暂无可测试的到期单词</p>
+      <button @click="startTest('', true)" class="px-4 py-2 rounded-xl bg-sky-600 text-white text-sm">随机抽查全部词库</button>
+    </div>
+  </section>
+
+  <!-- ================= 词库管理 ================= -->
+  <section v-if="view==='library'" class="space-y-5">
+
+    <!-- 导入 -->
+    <div class="bg-white rounded-2xl shadow-sm p-5">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="font-bold">📥 批量导入词库</h2>
+        <label class="flex items-center gap-1.5 text-sm text-slate-500 font-normal cursor-pointer select-none">
+          <input type="checkbox" v-model="autoSpeak" class="accent-indigo-600 w-4 h-4">自动朗读
+        </label>
+      </div>
+      <p class="text-xs text-slate-400 mb-3">粘贴 .txt 内容：每行一个纯英文单词。导入后自动查词：<b>中文释义</b>（MyMemory，国内直连）+ 音标/例句（Free Dictionary API，需国际网络时更全）。</p>
+      <textarea v-model="importText" rows="4" spellcheck="false"
+        class="w-full px-3 py-2 rounded-xl border border-slate-200 outline-none focus:border-indigo-400 font-mono text-sm"
+        placeholder="leverage&#10;stakeholder&#10;procurement&#10;..."></textarea>
+      <div class="flex flex-wrap items-center gap-3 mt-3">
+        <select v-model="importCat" class="px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white">
+          <option v-for="(c,k) in CATEGORIES" :key="k" :value="k">{{ c.label }}</option>
+        </select>
+        <button @click="doImport" :disabled="importing || !importText.trim()"
+          class="px-5 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold disabled:opacity-40">
+          {{ importing ? '导入中…' : '导入并查词（' + parseImport().length + ' 词）' }}
+        </button>
+      </div>
+      <div v-if="importing" class="mt-3">
+        <div class="flex justify-between text-xs text-slate-500 mb-1"><span>正在联网获取释义：{{ importCur }}</span><span>{{ importProg.done }}/{{ importProg.total }}</span></div>
+        <div class="h-2 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-sky-500 transition-all" :style="{width:(importProg.done/importProg.total*100)+'%'}"></div></div>
+      </div>
+    </div>
+
+    <!-- 筛选与列表 -->
+    <div class="bg-white rounded-2xl shadow-sm p-5">
+      <div class="flex flex-wrap gap-2 items-center mb-4">
+        <input v-model="libSearch" class="flex-1 min-w-[140px] px-3 py-2 rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-400" placeholder="🔍 搜索单词 / 释义">
+        <select v-model="libCat" class="px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white">
+          <option value="">全部场景</option>
+          <option v-for="(c,k) in CATEGORIES" :key="k" :value="k">{{ c.label }}</option>
+        </select>
+        <select v-model="libStatus" class="px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white">
+          <option value="">全部状态</option>
+          <option value="due">今日到期</option>
+          <option value="new">未学过</option>
+          <option value="mastered">已掌握</option>
+        </select>
+      </div>
+
+      <div class="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+        <div v-for="w in libWords" :key="w.word" class="flex items-center gap-3 border border-slate-100 rounded-xl px-3 py-2.5 hover:bg-slate-50">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2 flex-wrap">
+              <span class="font-bold text-base">{{ w.word }}</span>
+              <span class="text-xs text-slate-400">{{ w.phonetic }}</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full" :class="'bg-'+catColor(w.category)+'-100 text-'+catColor(w.category)+'-700'">{{ catLabel(w.category) }}</span>
+            </div>
+            <div class="text-sm text-slate-500 truncate mt-0.5">{{ showMeaning(w) || '（无释义，可点右侧 📖 获取）' }}</div>
+            <div class="text-xs mt-0.5"><span class="text-amber-400">{{ levelStars(w.level) }}</span><span class="text-slate-400 ml-2">{{ w.seen ? '下次复习：'+SRS.dueText(w.due) : '新词' }}</span></div>
+          </div>
+          <div class="flex gap-1 shrink-0">
+            <button @click="speak(w.word, w.audio)" title="朗读发音" class="w-8 h-8 rounded-lg hover:bg-sky-50">🔊</button>
+            <button @click="lookupOne(w.word)" :disabled="busyWord===w.word" title="联网获取/刷新词典释义" class="w-8 h-8 rounded-lg hover:bg-indigo-50 disabled:opacity-40">📖</button>
+            <button @click="editWord(w)" title="编辑" class="w-8 h-8 rounded-lg hover:bg-slate-100">✏️</button>
+            <button @click="removeWord(w)" title="移出库" class="w-8 h-8 rounded-lg hover:bg-rose-50">🗑️</button>
+          </div>
+        </div>
+        <p v-if="!libWords.length" class="text-center text-sm text-slate-400 py-8">没有符合条件的单词</p>
+      </div>
+      <div class="text-xs text-slate-400 mt-3 flex justify-between">
+        <span>显示 {{ libWords.length }} / {{ allWords.length }} 词</span>
+        <button v-if="store.removed.length" @click="restoreBuiltin" class="text-indigo-500 hover:underline">恢复被移除的内置词（{{ store.removed.length }}）</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 编辑弹窗 ================= -->
+  <div v-if="editing" class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" @click.self="editing=null">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3 max-h-[90vh] overflow-y-auto">
+      <h3 class="font-bold text-lg">{{ editing.word }} <span class="text-slate-400 text-sm font-normal">编辑词条</span></h3>
+      <div><label class="text-xs text-slate-500">音标</label><input v-model="editing.phonetic" class="w-full px-3 py-2 rounded-lg border border-slate-200 outline-none focus:border-indigo-400"></div>
+      <div><label class="text-xs text-slate-500">词性</label><input v-model="editing.pos" class="w-full px-3 py-2 rounded-lg border border-slate-200 outline-none focus:border-indigo-400"></div>
+      <div><label class="text-xs text-slate-500">中文释义（留空则显示 API 英文释义）</label><textarea v-model="editing.meaning" rows="2" class="w-full px-3 py-2 rounded-lg border border-slate-200 outline-none focus:border-indigo-400"></textarea></div>
+      <div><label class="text-xs text-slate-500">例句</label><textarea v-model="editing.example" rows="2" class="w-full px-3 py-2 rounded-lg border border-slate-200 outline-none focus:border-indigo-400"></textarea></div>
+      <div><label class="text-xs text-slate-500">例句翻译</label><textarea v-model="editing.exampleCn" rows="2" class="w-full px-3 py-2 rounded-lg border border-slate-200 outline-none focus:border-indigo-400"></textarea></div>
+      <div><label class="text-xs text-slate-500">场景分类</label>
+        <select v-model="editing.category" class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white">
+          <option v-for="(c,k) in CATEGORIES" :key="k" :value="k">{{ c.label }}</option>
+        </select>
+      </div>
+      <div class="flex gap-2 pt-1">
+        <button @click="saveEdit" class="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-bold">保存</button>
+        <button @click="editing=null" class="flex-1 py-2.5 rounded-xl bg-slate-100">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 全局提示 ================= -->
+  <transition enter-active-class="transition duration-300" enter-from-class="opacity-0 translate-y-3"
+              leave-active-class="transition duration-300" leave-to-class="opacity-0">
+    <div v-if="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white text-sm px-4 py-2.5 rounded-xl shadow-lg max-w-[90vw] text-center z-50">{{ toast }}</div>
+  </transition>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/srs.js"></script>
+<script src="js/dict.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
